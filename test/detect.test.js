@@ -189,3 +189,28 @@ test('fix6: OpenAI node image analyze without a model falls back to gpt-4o', () 
   assert.equal(f[0].model, 'gpt-4o');
   assert.equal(f[0].confidence, 'inferred');
 });
+
+// Gaps found on real templates from the n8n library.
+test('real1: HTTP Request v1 bodyParametersJson is scanned', () => {
+  const n = { name: 'Translate', type: 'n8n-nodes-base.httpRequest', typeVersion: 1, parameters: { url: 'https://api.openai.com/v1/chat/completions', jsonParameters: true, bodyParametersJson: '={\n "model": "gpt-4o-mini",\n "messages": []}' } };
+  const f = scanWorkflow(wf([n]), { today: TODAY });
+  assert.equal(f.length, 1);
+  assert.equal(f[0].model, 'gpt-4o-mini');
+});
+
+test('real2: HTTP call to an LLM provider with the model built upstream needs a manual check', () => {
+  const n = { name: 'Extract', type: 'n8n-nodes-base.httpRequest', typeVersion: 4.2, parameters: { url: 'https://api.openai.com/v1/chat/completions', jsonBody: '={{ JSON.stringify($json.ai_body) }}' } };
+  const f = scanWorkflow(wf([n]), { today: TODAY });
+  assert.equal(f.length, 1);
+  assert.equal(f[0].confidence, 'dynamic');
+  assert.equal(f[0].severity, 'unknown');
+  assert.match(f[0].note, /upstream/);
+});
+
+test('real3: OpenAI app node with no model in the export is flagged as inferred/unknown', () => {
+  const n = { name: 'OpenAI', type: LC + 'openAi', typeVersion: 1.6, parameters: {} };
+  const f = scanWorkflow(wf([n]), { today: TODAY });
+  assert.equal(f.length, 1);
+  assert.equal(f[0].confidence, 'inferred');
+  assert.equal(f[0].severity, 'unknown');
+});

@@ -22,7 +22,8 @@
     [LC + 'lmChatVercelAiGateway']: ['model'],
   };
   const HTTP = ['n8n-nodes-base.httpRequest', 'n8n-nodes-base.httpRequestTool', LC + 'toolHttpRequest'];
-  const HTTP_FIELDS = ['jsonBody', 'body', 'bodyParameters.parameters[].value', 'jsonQuery', 'queryParameters.parameters[].value'];
+  // v3+ fields first, then the v1/v2 names (bodyParametersJson etc.) still common in older templates.
+  const HTTP_FIELDS = ['jsonBody', 'body', 'bodyParameters.parameters[].value', 'jsonQuery', 'queryParameters.parameters[].value', 'bodyParametersJson', 'queryParametersJson', 'bodyParametersUi.parameter[].value'];
   const TEXT = {
     'n8n-nodes-base.code': ['jsCode', 'pythonCode'],
     [LC + 'code']: ['code.execute.code', 'code.supplyData.code'],
@@ -173,7 +174,7 @@
           const def = S.DEFAULTS[node.type + '@' + node.typeVersion] || S.DEFAULTS[node.type];
           const hit = def && lookup(def);
           if (hit) emit('parameters (default)', hit.id, 'inferred', hit, { note: 'default, not in export' + (hit.note ? '; ' + hit.note : '') });
-          else if (!def && node.type === LC + 'lmChatOpenAi') emit('parameters (default)', '(default, not in export)', 'inferred', null, { note: 'default depends on n8n version; open the node to see it' });
+          else if (!def && (node.type === LC + 'lmChatOpenAi' || (node.type === LC + 'openAi' && (p.resource || 'text') === 'text'))) emit('parameters (default)', '(default, not in export)', 'inferred', null, { note: 'default depends on n8n version; open the node to see it' });
         }
         if (node.type === LC + 'openAi' && p.resource === 'audio' && (p.operation === 'transcribe' || p.operation === 'translate')) {
           emit('parameters.operation', 'whisper-1', 'inferred', lookup('whisper-1'), { note: 'hard-coded in node' });
@@ -188,7 +189,9 @@
           const dep = url.match(AZURE_DEPLOYMENT);
           const hit = dep && lookup(dep[1]);
           if (hit) emit('parameters.url', hit.id, 'explicit', hit, azure(hit));
+          const before = out.length;
           scanText(HTTP_FIELDS, 'explicit');
+          if (out.length === before && !hit) emit('parameters.url', '(not in this node)', 'dynamic', null, { note: 'calls an LLM API but the model is set upstream or at runtime; check the node that builds the request' });
         }
       } else if (TEXT[node.type]) {
         for (const path of TEXT[node.type]) scanText([path], 'mentioned', path === 'pythonCode');
