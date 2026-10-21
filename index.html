@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>n8n model shutdown scanner</title>
+<style>
+  body { font: 15px/1.45 system-ui, sans-serif; margin: 0 auto; max-width: 1100px; padding: 16px; color: #222; background: #fff; }
+  h1 { font-size: 1.4rem; margin: 0 0 4px; }
+  p { margin: 6px 0; }
+  .muted { color: #666; font-size: .9rem; }
+  textarea { width: 100%; box-sizing: border-box; height: 160px; font: 13px/1.4 ui-monospace, monospace; padding: 8px; border: 1px solid #bbb; border-radius: 4px; }
+  #drop { border: 2px dashed #bbb; border-radius: 6px; padding: 10px; text-align: center; margin: 8px 0; cursor: pointer; }
+  #drop.over { border-color: #06c; background: #eef5ff; }
+  button, input[type=text] { font: inherit; padding: 6px 12px; border: 1px solid #888; border-radius: 4px; background: #f6f6f6; }
+  button { cursor: pointer; }
+  .bar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 10px 0; }
+  .err { color: #b00020; }
+  .deadline { font-weight: 600; }
+  .broken { color: #b00020; } .urgent { color: #c25a00; } .info { color: #777; }
+  table { border-collapse: collapse; width: 100%; font-size: .85rem; margin-top: 8px; }
+  th, td { border: 1px solid #ddd; padding: 4px 6px; text-align: left; vertical-align: top; }
+  th { background: #f3f3f3; }
+  .wrap { overflow-x: auto; }
+  footer { margin-top: 28px; padding-top: 10px; border-top: 1px solid #ddd; font-size: .9rem; }
+  @media print { .noprint { display: none !important; } body { max-width: none; padding: 0; } table { font-size: 10px; } a[href]::after { content: ""; } }
+</style>
+</head>
+<body>
+<h1 id="heading">n8n model shutdown scanner</h1>
+<p class="muted noprint">Paste or drop n8n workflow exports. Nothing leaves your browser: the scan runs entirely in this page.</p>
+
+<div class="noprint">
+  <div id="drop">Drop one or more workflow <code>.json</code> exports here, or click to choose files<input id="file" type="file" accept=".json,application/json" multiple hidden></div>
+  <textarea id="input" placeholder='Paste a workflow export here: a single workflow, an array from "Export all", or an API page {"data":[...]}'></textarea>
+  <div class="bar">
+    <button id="scan">Scan</button>
+    <label>Report title <input id="title" type="text" placeholder="Client XY, Oct 2026"></label>
+    <button id="download" disabled>Download JSON</button>
+    <button id="print" disabled>Print</button>
+    <span id="error" class="err"></span>
+  </div>
+</div>
+
+<div id="results"></div>
+
+<footer>
+  <p>Data checked 2026-10-21 against the vendors' deprecation pages. Model defaults that n8n does not write into the export are marked <em>inferred</em>; expressions are marked <em>dynamic</em> and need a manual look.</p>
+  <p>Need proof the swap is safe before Jan 14? Migration check, €149 per instance: we replay your real executions on the new model and send a pass/fail report. <a href="mailto:felix@quyre.de?subject=n8n%20migration%20check">felix@quyre.de</a></p>
+  <p class="muted"><a href="impressum.html">Impressum</a> · <a href="https://github.com/larik15/n8n-sunset">Data seeded from n8n-sunset (MIT) and extended</a></p>
+</footer>
+
+<script src="models.js"></script>
+<script src="detect.js"></script>
+<script>
+(function () {
+  const S = globalThis.n8nModelScan;
+  const $ = (id) => document.getElementById(id);
+  let findings = [];
+
+  function esc(s) { return String(s == null ? '' : s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
+
+  function render() {
+    const today = new Date().toISOString().slice(0, 10);
+    const sum = S.summarize(findings);
+    const lines = sum.markdown.split('\n\n')[0].split('\n').filter(Boolean);
+    const sorted = findings.slice().sort((a, b) => (a.shutdown || '9999').localeCompare(b.shutdown || '9999') || a.workflow.localeCompare(b.workflow));
+    const cols = ['Workflow', 'Active', 'Node', 'Used by', 'Model', 'Found as', 'Shutdown', 'Days left', 'Replacement', 'Note'];
+    let h = '<p class="muted">Scanned ' + today + '. ' + esc(sum.total) + ' finding' + (sum.total === 1 ? '' : 's') + '.</p>';
+    h += lines.map((l) => '<p class="deadline">' + esc(l) + '</p>').join('');
+    if (!findings.length) { $('results').innerHTML = h + '<p>No retiring models found.</p>'; return; }
+    h += '<div class="wrap"><table><thead><tr>' + cols.map((c) => '<th>' + c + '</th>').join('') + '</tr></thead><tbody>';
+    for (const f of sorted) {
+      h += '<tr class="' + esc(f.severity) + '">' + [f.workflow, f.active ? 'yes' : 'no', f.node + (f.nodeDisabled ? ' (disabled)' : ''), f.usedBy, f.model, f.confidence, f.shutdown || '?', f.daysLeft == null ? '' : f.daysLeft, f.replacement, f.note].map((v) => '<td>' + esc(v) + '</td>').join('') + '</tr>';
+    }
+    $('results').innerHTML = h + '</tbody></table></div>';
+  }
+
+  function scan(text) {
+    $('error').textContent = '';
+    let data;
+    try { data = JSON.parse(text); } catch (e) { $('error').textContent = 'Not valid JSON: ' + e.message; return; }
+    findings = S.scanWorkflow(data, { today: new Date().toISOString().slice(0, 10) });
+    $('heading').textContent = $('title').value.trim() || 'n8n model shutdown scanner';
+    render();
+    $('download').disabled = $('print').disabled = false;
+  }
+
+  function readFiles(files) {
+    Promise.all(Array.from(files).map((f) => f.text())).then((texts) => {
+      const parsed = [];
+      for (const t of texts) {
+        try { const j = JSON.parse(t); Array.isArray(j) ? parsed.push(...j) : j && Array.isArray(j.data) ? parsed.push(...j.data) : parsed.push(j); }
+        catch (e) { $('error').textContent = 'A file is not valid JSON: ' + e.message; return; }
+      }
+      $('input').value = JSON.stringify(parsed);
+      scan($('input').value);
+    });
+  }
+
+  $('scan').onclick = () => scan($('input').value);
+  $('input').addEventListener('input', () => { if ($('input').value.trim().endsWith('}') || $('input').value.trim().endsWith(']')) scan($('input').value); });
+  $('title').addEventListener('input', () => { $('heading').textContent = $('title').value.trim() || 'n8n model shutdown scanner'; });
+  $('download').onclick = () => {
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob([JSON.stringify(findings, null, 2)], { type: 'application/json' }));
+    a.download = 'n8n-model-findings.json';
+    a.click();
+  };
+  $('print').onclick = () => window.print();
+  $('drop').onclick = () => $('file').click();
+  $('file').onchange = () => readFiles($('file').files);
+  $('drop').ondragover = (e) => { e.preventDefault(); $('drop').classList.add('over'); };
+  $('drop').ondragleave = () => $('drop').classList.remove('over');
+  $('drop').ondrop = (e) => { e.preventDefault(); $('drop').classList.remove('over'); readFiles(e.dataTransfer.files); };
+})();
+</script>
+</body>
+</html>
