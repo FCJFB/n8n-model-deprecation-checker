@@ -31,3 +31,7 @@ test('page distinguishes "no workflow in input" from "no findings" and catches s
   assert.ok(!h.includes('seeded from n8n-sunset'), 'no false attribution');
   assert.ok(h.includes('Inspired by n8n-sunset'));
 });
+
+test('rv5: dropped files are scanned directly, not re-serialized into the textarea', () => {
+  assert.ok(!html().includes('JSON.stringify(parsed)'));
+});

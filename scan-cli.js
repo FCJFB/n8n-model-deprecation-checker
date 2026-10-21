@@ -16,11 +16,13 @@ const workflows = [];
 for (const file of files) {
   let j;
   try { j = JSON.parse(fs.readFileSync(file, 'utf8')); } catch (e) { console.error(file + ': ' + e.message); continue; }
-  let w = j && j.workflow && j.workflow.workflow ? Object.assign({ id: j.workflow.id, name: j.workflow.name }, j.workflow.workflow) : j;
-  if (w && !w.name) w.name = path.basename(file, '.json');
-  workflows.push(w);
+  const list = Array.isArray(j) ? j : j && Array.isArray(j.data) ? j.data : [j && j.workflow && j.workflow.workflow ? Object.assign({ id: j.workflow.id, name: j.workflow.name }, j.workflow.workflow) : j];
+  for (const w of list) {
+    if (w && typeof w === 'object' && !w.name) w.name = path.basename(file, '.json');
+    workflows.push(w);
+  }
 }
-const findings = scanWorkflow(workflows, { today: new Date().toISOString().slice(0, 10) });
+const findings = scanWorkflow(workflows, {});
 if (asJson) console.log(JSON.stringify({ scanned: findings.scanned, findings }, null, 2));
 else {
   console.log('Scanned ' + findings.scanned.workflows + ' workflows, ' + findings.scanned.nodes + ' nodes, ' + findings.length + ' findings\n');

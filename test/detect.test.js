@@ -214,3 +214,48 @@ test('real3: OpenAI app node with no model in the export is flagged as inferred/
   assert.equal(f[0].confidence, 'inferred');
   assert.equal(f[0].severity, 'unknown');
 });
+
+// Ponytail review fixes.
+test('rv1: HTTP body with a non-retiring model gives no finding at all', () => {
+  const n = { name: 'h', type: 'n8n-nodes-base.httpRequest', typeVersion: 4.2, parameters: { url: 'https://api.openai.com/v1/chat/completions', jsonBody: '={"model":"gpt-5.2"}' } };
+  assert.equal(scanWorkflow(wf([n]), { today: TODAY }).length, 0);
+  const g = { name: 'g', type: 'n8n-nodes-base.httpRequest', typeVersion: 4.2, parameters: { url: 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent' } };
+  assert.equal(scanWorkflow(wf([g]), { today: TODAY }).length, 0);
+});
+
+test('rv3: bare identifiers in Code nodes are not model mentions, quoted ones are', () => {
+  const n = { name: 'c', type: 'n8n-nodes-base.code', typeVersion: 2, parameters: { jsCode: 'const o1 = 1, o3 = 2; const m = `gpt-4o`; return [{json:{o1,o3,m}}]' } };
+  const f = scanWorkflow(wf([n]), { today: TODAY });
+  assert.deepEqual(f.map((x) => x.model), ['gpt-4o']);
+});
+
+test('rv4: headline counts distinct nodes and skips disabled ones', () => {
+  const c = { name: 'c', type: 'n8n-nodes-base.code', typeVersion: 2, parameters: { jsCode: '"gpt-4o" "gpt-4o-mini"' } };
+  const d = { name: 'd', type: LC + 'lmChatOpenAi', typeVersion: 1.2, disabled: true, parameters: { model: 'gpt-4.1' } };
+  const s = summarize(scanWorkflow(wf([c, d]), { today: TODAY }));
+  assert.equal(s.counts['2027-01-14'], 1);
+  assert.match(s.lines[0], /^1 node breaks on 2027-01-14/);
+});
+
+test('rv6: summarize returns lines and the sorted findings', () => {
+  const a = { name: 'a', type: LC + 'lmChatOpenAi', typeVersion: 1.2, parameters: { model: 'gpt-4o' } };
+  const b = { name: 'b', type: LC + 'lmChatOpenAi', typeVersion: 1.2, parameters: { model: 'o3-mini' } };
+  const s = summarize(scanWorkflow(wf([a, b]), { today: TODAY }));
+  assert.equal(s.lines.length, 2);
+  assert.equal(s.sorted[0].model, 'o3-mini');
+});
+
+test('rv9: python # inside a string does not hide a model', () => {
+  const n = { name: 'p', type: 'n8n-nodes-base.code', typeVersion: 2, parameters: { pythonCode: 'color = "#fff"; model = "gpt-4o"  # gpt-4o-mini in a comment' } };
+  assert.deepEqual(scanWorkflow(wf([n]), { today: TODAY }).map((x) => x.model), ['gpt-4o']);
+});
+
+test('rv10: expression URL with nodeCredentialType openAiApi is scanned', () => {
+  const n = { name: 'h', type: 'n8n-nodes-base.httpRequest', typeVersion: 4.2, parameters: { url: '={{ $json.base }}/v1/chat/completions', nodeCredentialType: 'openAiApi', jsonBody: '={"model":"gpt-4o"}' } };
+  assert.equal(scanWorkflow(wf([n]), { today: TODAY })[0].model, 'gpt-4o');
+});
+
+test('rv3b: a Set node value that is just the model id is still a mention', () => {
+  const n = { name: 'Configuration', type: 'n8n-nodes-base.set', typeVersion: 3.4, parameters: { assignments: { assignments: [{ name: 'openai_text_model', value: 'gpt-4o', type: 'string' }, { name: 'note', value: 'const o1 = 1', type: 'string' }] } } };
+  assert.deepEqual(scanWorkflow(wf([n]), { today: TODAY }).map((x) => x.model), ['gpt-4o']);
+});

@@ -3,7 +3,10 @@
 (function () {
   const S = (globalThis.n8nModelScan = globalThis.n8nModelScan || {});
   const LC = '@n8n/n8n-nodes-langchain.';
-  const ID_RE = /\b(ft:[\w.:-]+|gpt-[\w.-]+|chatgpt-[\w.-]+|o[134](?:-[\w-]+)?|claude-[\w.-]+|gemini-[\w.-]+|whisper-1|tts-1(?:-hd)?|dall-e-[23]|text-embedding-[\w-]+)/g;
+  const ID_SRC = '(ft:[\\w.:-]+|gpt-[\\w.-]+|chatgpt-[\\w.-]+|o[134](?:-[\\w-]+)?|claude-[\\w.-]+|gemini-[\\w.-]+|whisper-1|tts-1(?:-hd)?|dall-e-[23]|text-embedding-[\\w-]+)';
+  const ID_RE = new RegExp('\\b' + ID_SRC, 'g');
+  const QUOTED_ID_RE = new RegExp('([\'"`])' + ID_SRC + '\\1', 'g'); // code and Set values: only quoted literals
+  const WHOLE_ID_RE = new RegExp('^' + ID_SRC + '$'); // a Set value that is nothing but the model id
   const PROVIDER_URL = /api\.openai\.com|openrouter\.ai|api\.anthropic\.com|generativelanguage\.googleapis\.com|openai\.azure\.com|\/openai\/deployments\//;
   const AZURE_DEPLOYMENT = /\/deployments\/([^/?#]+)/;
 
@@ -51,14 +54,15 @@
     return out;
   }
 
-  const PREFIXES = () => S.MODELS.filter((e) => e.kind === 'prefix').sort((a, b) => b.id.length - a.id.length);
+  let prefixes;
   function lookup(id) {
+    prefixes = prefixes || S.MODELS.filter((e) => e.kind === 'prefix').sort((a, b) => b.id.length - a.id.length);
     let note = '';
     if (id.startsWith('openai/')) {
       id = id.slice(7);
       note = 'gateway; shutdown depends on provider';
     }
-    let entry = S.MODELS.find((e) => e.kind !== 'prefix' && e.id === id) || PREFIXES().find((e) => id.startsWith(e.id));
+    let entry = S.MODELS.find((e) => e.kind !== 'prefix' && e.id === id) || prefixes.find((e) => id.startsWith(e.id));
     if (!entry) {
       // Dated snapshot of a listed alias, e.g. o3-mini-2025-01-31 or gpt-3.5-turbo-1106.
       const base = id.replace(/-(\d{4}-\d{2}-\d{2}|\d{4})$/, '');
@@ -69,11 +73,12 @@
     }
     return entry ? { entry, id, note } : null;
   }
-  function extract(text) {
+  function extract(text, quotedOnly) {
     const seen = new Set();
     const hits = [];
-    for (const m of text.match(ID_RE) || []) {
-      const id = m.replace(/[.:]+$/, '');
+    const re = quotedOnly ? QUOTED_ID_RE : ID_RE;
+    for (const m of text.match(re) || []) {
+      const id = m.replace(/^['"`]|['"`]$/g, '').replace(/[.:]+$/, '');
       if (seen.has(id)) continue;
       seen.add(id);
       const r = lookup(id);
@@ -82,16 +87,20 @@
     return hits;
   }
   function stripComments(text, python) {
-    return python ? text.replace(/#.*$/gm, '') : text.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[\s;{(])\/\/.*$/gm, '$1');
+    return python ? text.replace(/(^|\s)#.*$/gm, '$1') : text.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[\s;{(])\/\/.*$/gm, '$1');
   }
 
+  function localDate(d) {
+    d = d || new Date();
+    return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+  }
   function days(from, to) {
     const d = (s) => Date.UTC(+s.slice(0, 4), +s.slice(5, 7) - 1, +s.slice(8, 10));
     return Math.round((d(to) - d(from)) / 864e5);
   }
 
   function scanOne(wf, opts, out) {
-    const today = opts.today || new Date().toISOString().slice(0, 10);
+    const today = typeof opts.today === 'string' ? opts.today : localDate(opts.today instanceof Date ? opts.today : undefined);
     const usedBy = {};
     const conns = wf.connections && typeof wf.connections === 'object' ? wf.connections : {};
     for (const src in conns) {
@@ -139,14 +148,17 @@
           ? { provider: 'azure-openai', shutdown: e.azureShutdown, sources: [e.azureSource], note: 'Azure deployment; verify which model it runs' }
           : { provider: 'azure-openai', note: 'Azure deployment; Azure retirement date differs from OpenAI, verify' };
       };
+      // python: undefined = JSON-ish text (any literal), true/false = source code (quoted literals, comments stripped).
       const scanText = (paths, confidence, python) => {
         for (const path of paths) {
           for (const { loc, value } of get(p, path)) {
             if (typeof value !== 'string') continue;
-            for (const hit of extract(python === undefined ? value : stripComments(value, python))) emit(loc, hit.id, confidence, hit);
+            const src = python === undefined ? value : stripComments(value, python);
+            for (const hit of extract(src, python !== undefined && !WHOLE_ID_RE.test(value.trim()))) emit(loc, hit.id, confidence, hit);
           }
         }
       };
+      const textFields = () => HTTP_FIELDS.flatMap((path) => get(p, path).map((x) => x.value)).filter((v) => typeof v === 'string');
 
       if (LLM[node.type]) {
         let found = false;
@@ -184,16 +196,18 @@
         }
       } else if (HTTP.includes(node.type)) {
         const url = typeof p.url === 'string' ? p.url : '';
-        const hasCred = !!(node.credentials && node.credentials.openAiApi);
+        const hasCred = !!((node.credentials && node.credentials.openAiApi) || p.nodeCredentialType === 'openAiApi');
         if (PROVIDER_URL.test(url) || (url.startsWith('=') && hasCred)) {
           const dep = url.match(AZURE_DEPLOYMENT);
           const hit = dep && lookup(dep[1]);
           if (hit) emit('parameters.url', hit.id, 'explicit', hit, azure(hit));
-          const before = out.length;
           scanText(HTTP_FIELDS, 'explicit');
-          if (out.length === before && !hit) emit('parameters.url', '(not in this node)', 'dynamic', null, { note: 'calls an LLM API but the model is set upstream or at runtime; check the node that builds the request' });
+          // No model name anywhere in this node (retiring or not): it must come from upstream.
+          const anyModel = dep || [url].concat(textFields()).some((v) => v.search(ID_RE) >= 0);
+          if (!anyModel) emit('parameters.url', '(not in this node)', 'dynamic', null, { note: 'calls an LLM API but the model is set upstream or at runtime; check the node that builds the request' });
         }
       } else if (TEXT[node.type]) {
+        // Code: quoted literals only. Set (Edit Fields): quoted literals, or a value that is exactly the model id ("gpt-4o").
         for (const path of TEXT[node.type]) scanText([path], 'mentioned', path === 'pythonCode');
       }
     }
@@ -214,21 +228,27 @@
 
   const COLS = ['Workflow', 'Active', 'Last run', 'Node', 'Used by', 'Model', 'Found as', 'Shutdown', 'Days left', 'Replacement', 'Note'];
   function summarize(findings) {
-    const counts = {};
-    let unknown = 0;
+    // Headline counts are distinct nodes per deadline; disabled nodes (severity info) do not break anything.
+    const nodes = {};
+    const unknownNodes = new Set();
     for (const f of findings) {
-      if (f.shutdown) counts[f.shutdown] = (counts[f.shutdown] || 0) + 1;
-      else unknown++;
+      const key = f.workflowId + '/' + f.workflow + '/' + f.node;
+      if (f.severity === 'info') continue;
+      if (f.shutdown) (nodes[f.shutdown] = nodes[f.shutdown] || new Set()).add(key);
+      else unknownNodes.add(key);
     }
-    const sorted = findings.slice().sort((a, b) => (a.shutdown || '9999').localeCompare(b.shutdown || '9999') || a.workflow.localeCompare(b.workflow));
+    const counts = {};
+    for (const d in nodes) counts[d] = nodes[d].size;
+    const sorted = findings.slice().sort((a, b) => (a.shutdown || '9999').localeCompare(b.shutdown || '9999') || String(a.workflow).localeCompare(String(b.workflow)));
     const lines = Object.keys(counts).sort().map((d) => counts[d] + (counts[d] === 1 ? ' node breaks on ' : ' nodes break on ') + d);
-    if (unknown) lines.push(unknown + ' need a manual check (dynamic or unknown model)');
+    if (unknownNodes.size) lines.push(unknownNodes.size + ' need a manual check (dynamic or unknown model)');
     const cell = (v) => String(v == null ? '' : v).replace(/\|/g, '\\|').replace(/\n/g, ' ');
     const rows = sorted.map((f) => [f.workflow, f.active ? 'yes' : 'no', f.lastRunAt ? f.lastRunAt.slice(0, 10) + (f.lastRunStatus ? ' ' + f.lastRunStatus : '') : '', f.node + (f.nodeDisabled ? ' (disabled)' : ''), f.usedBy, f.model, f.confidence, f.shutdown || '?', f.daysLeft == null ? '' : f.daysLeft, f.replacement, f.note]);
     const table = ['| ' + COLS.join(' | ') + ' |', '|' + COLS.map(() => '---').join('|') + '|'].concat(rows.map((r) => '| ' + r.map(cell).join(' | ') + ' |'));
-    return { counts, total: findings.length, markdown: lines.join('\n') + '\n\n' + table.join('\n') };
+    return { counts, total: findings.length, lines, sorted, markdown: lines.join('\n') + '\n\n' + table.join('\n') };
   }
 
   S.scanWorkflow = scanWorkflow;
   S.summarize = summarize;
+  S.localDate = localDate;
 })();

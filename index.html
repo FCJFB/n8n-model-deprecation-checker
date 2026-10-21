@@ -60,30 +60,28 @@
 
   function esc(s) { return String(s == null ? '' : s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
 
+  const COLS = ['Workflow', 'Active', 'Node', 'Used by', 'Model', 'Found as', 'Shutdown', 'Days left', 'Replacement', 'Note'];
   function render() {
-    const today = new Date().toISOString().slice(0, 10);
-    const sum = S.summarize(findings);
-    const lines = sum.markdown.split('\n\n')[0].split('\n').filter(Boolean);
-    const sorted = findings.slice().sort((a, b) => (a.shutdown || '9999').localeCompare(b.shutdown || '9999') || a.workflow.localeCompare(b.workflow));
-    const cols = ['Workflow', 'Active', 'Node', 'Used by', 'Model', 'Found as', 'Shutdown', 'Days left', 'Replacement', 'Note'];
     const sc = findings.scanned || { workflows: 0, nodes: 0 };
     if (!sc.workflows) { $('results').innerHTML = '<p class="err">No n8n workflow found in this input. Paste a workflow export (it has a "nodes" array), an array of them, or an API page.</p>'; return; }
-    let h = '<p class="muted">Scanned ' + today + ': ' + sc.workflows + ' workflow' + (sc.workflows === 1 ? '' : 's') + ', ' + sc.nodes + ' nodes, ' + esc(sum.total) + ' finding' + (sum.total === 1 ? '' : 's') + '.</p>';
-    h += lines.map((l) => '<p class="deadline">' + esc(l) + '</p>').join('');
+    const sum = S.summarize(findings);
+    let h = '<p class="muted">Scanned ' + S.localDate() + ': ' + sc.workflows + ' workflow' + (sc.workflows === 1 ? '' : 's') + ', ' + sc.nodes + ' nodes, ' + esc(sum.total) + ' finding' + (sum.total === 1 ? '' : 's') + '.</p>';
+    h += sum.lines.map((l) => '<p class="deadline">' + esc(l) + '</p>').join('');
     if (!findings.length) { $('results').innerHTML = h + '<p>No retiring models found.</p>'; return; }
-    h += '<div class="wrap"><table><thead><tr>' + cols.map((c) => '<th>' + c + '</th>').join('') + '</tr></thead><tbody>';
-    for (const f of sorted) {
+    h += '<div class="wrap"><table><thead><tr>' + COLS.map((c) => '<th>' + c + '</th>').join('') + '</tr></thead><tbody>';
+    for (const f of sum.sorted) {
       h += '<tr class="' + esc(f.severity) + '">' + [f.workflow, f.active ? 'yes' : 'no', f.node + (f.nodeDisabled ? ' (disabled)' : ''), f.usedBy, f.model, f.confidence, f.shutdown || '?', f.daysLeft == null ? '' : f.daysLeft, f.replacement, f.note].map((v) => '<td>' + esc(v) + '</td>').join('') + '</tr>';
     }
     $('results').innerHTML = h + '</tbody></table></div>';
   }
 
-  function scan(text) {
+  function scan(data) {
     $('error').textContent = '';
-    let data;
-    try { data = JSON.parse(text); } catch (e) { $('error').textContent = 'Not valid JSON: ' + e.message; return; }
+    if (typeof data === 'string') {
+      try { data = JSON.parse(data); } catch (e) { $('error').textContent = 'Not valid JSON: ' + e.message; return; }
+    }
     try {
-      findings = S.scanWorkflow(data, { today: new Date().toISOString().slice(0, 10) });
+      findings = S.scanWorkflow(data, {});
       $('heading').textContent = $('title').value.trim() || 'n8n model shutdown scanner';
       render();
     } catch (e) { $('error').textContent = 'Scan failed: ' + e.message; return; }
@@ -91,15 +89,16 @@
   }
 
   function readFiles(files) {
-    Promise.all(Array.from(files).map((f) => f.text())).then((texts) => {
+    const list = Array.from(files);
+    Promise.all(list.map((f) => f.text())).then((texts) => {
       const parsed = [];
-      for (const t of texts) {
-        try { const j = JSON.parse(t); Array.isArray(j) ? parsed.push(...j) : j && Array.isArray(j.data) ? parsed.push(...j.data) : parsed.push(j); }
-        catch (e) { $('error').textContent = 'A file is not valid JSON: ' + e.message; return; }
-      }
-      $('input').value = JSON.stringify(parsed);
-      scan($('input').value);
-    });
+      texts.forEach((t, i) => {
+        const j = JSON.parse(t); // throws into .catch below with the file name
+        Array.isArray(j) ? parsed.push(...j) : j && Array.isArray(j.data) ? parsed.push(...j.data) : parsed.push(j);
+      });
+      $('input').value = list.length + ' file' + (list.length === 1 ? '' : 's') + ' loaded: ' + list.map((f) => f.name).join(', ');
+      scan(parsed);
+    }).catch((e) => { $('error').textContent = 'Could not read a dropped file: ' + e.message; });
   }
 
   $('scan').onclick = () => scan($('input').value);
