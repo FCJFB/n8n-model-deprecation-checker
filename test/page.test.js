@@ -23,3 +23,11 @@ test('page has print CSS', () => {
 test('impressum page exists', () => {
   assert.ok(fs.existsSync(path.join(root, 'impressum.html')));
 });
+
+test('page distinguishes "no workflow in input" from "no findings" and catches scan errors', () => {
+  const h = html();
+  assert.ok(h.includes('No n8n workflow found'), 'no-workflow message');
+  assert.match(h, /try \{[^}]*scanWorkflow/s, 'scan wrapped in try');
+  assert.ok(!h.includes('seeded from n8n-sunset'), 'no false attribution');
+  assert.ok(h.includes('Inspired by n8n-sunset'));
+});

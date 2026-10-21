@@ -133,3 +133,59 @@ test('summarize counts per deadline and renders a markdown table', () => {
   assert.match(s.markdown, /\| Workflow \|/);
   assert.ok(s.markdown.indexOf('o3-mini') < s.markdown.indexOf('gpt-4o'), 'sorted by shutdown');
 });
+
+// Final-review fixes.
+test('fix1: gpt-image-1 in an HTTP body is found', () => {
+  const n = { name: 'Gen', type: 'n8n-nodes-base.httpRequest', typeVersion: 4.2, parameters: { url: 'https://api.openai.com/v1/images/generations', jsonBody: '={"model":"gpt-image-1"}' } };
+  const f = scanWorkflow(wf([n]), { today: TODAY });
+  assert.equal(f.length, 1);
+  assert.equal(f[0].model, 'gpt-image-1');
+  assert.equal(f[0].shutdown, '2026-10-23');
+});
+
+test('fix2: a dated snapshot of a retiring alias takes the alias date', () => {
+  const sub = { name: 'M', type: LC + 'lmChatOpenAi', typeVersion: 1.2, parameters: { model: 'o3-mini-2025-01-31' } };
+  const f = scanWorkflow(wf([sub]), { today: TODAY });
+  assert.equal(f.length, 1);
+  assert.equal(f[0].shutdown, '2026-10-23');
+  assert.match(f[0].note, /dated snapshot/);
+  const d = { name: 'D', type: LC + 'openAiAssistant', typeVersion: 1, parameters: {} };
+  assert.equal(scanWorkflow(wf([d]), { today: TODAY })[0].model, 'gpt-3.5-turbo-1106');
+});
+
+test('fix3: malformed workflows do not abort the scan', () => {
+  const sub = { name: 'M', type: LC + 'lmChatOpenAi', typeVersion: 1.2, parameters: { model: 'gpt-4o' } };
+  const bad = [
+    wf([sub], { X: null }),
+    wf([sub], { M: { ai_languageModel: [[null]] } }),
+    wf([null, sub]),
+    Object.assign(wf([sub]), { nodes: {} }),
+    { nodes: [{ type: 'n8n-nodes-base.code', parameters: { jsCode: 'x' } }], connections: 'nope' },
+  ];
+  assert.equal(scanWorkflow(bad, { today: TODAY }).length, 3);
+});
+
+test('fix4: scan reports how many workflows and nodes it looked at', () => {
+  const sub = { name: 'M', type: LC + 'lmChatOpenAi', typeVersion: 1.2, parameters: { model: 'gpt-4o' } };
+  assert.deepEqual(scanWorkflow({ foo: 1 }, { today: TODAY }).scanned, { workflows: 0, nodes: 0 });
+  assert.deepEqual(scanWorkflow([wf([sub, AGENT]), wf([sub])], { today: TODAY }).scanned, { workflows: 2, nodes: 3 });
+});
+
+test('fix5: Azure deployments are reported even when the name is not a model id', () => {
+  const sub = { name: 'Az', type: LC + 'lmChatAzureOpenAi', typeVersion: 1, parameters: { model: 'prod-chat' } };
+  const f = scanWorkflow(wf([sub]), { today: TODAY });
+  assert.equal(f.length, 1);
+  assert.equal(f[0].provider, 'azure-openai');
+  assert.equal(f[0].severity, 'unknown');
+  assert.equal(f[0].confidence, 'dynamic');
+  const n = { name: 'A', type: 'n8n-nodes-base.httpRequest', typeVersion: 4.2, parameters: { url: 'https://x.openai.azure.com/openai/deployments/o3-mini/chat/completions' } };
+  assert.equal(scanWorkflow(wf([n]), { today: TODAY })[0].shutdown, '2026-11-19');
+});
+
+test('fix6: OpenAI node image analyze without a model falls back to gpt-4o', () => {
+  const n = { name: 'See', type: LC + 'openAi', typeVersion: 1.8, parameters: { resource: 'image', operation: 'analyze' } };
+  const f = scanWorkflow(wf([n]), { today: TODAY });
+  assert.equal(f.length, 1);
+  assert.equal(f[0].model, 'gpt-4o');
+  assert.equal(f[0].confidence, 'inferred');
+});

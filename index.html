@@ -47,7 +47,7 @@
 <footer>
   <p>Data checked 2026-10-21 against the vendors' deprecation pages. Model defaults that n8n does not write into the export are marked <em>inferred</em>; expressions are marked <em>dynamic</em> and need a manual look.</p>
   <p>Need proof the swap is safe before Jan 14? Migration check, €149 per instance: we replay your real executions on the new model and send a pass/fail report. <a href="mailto:felix@quyre.de?subject=n8n%20migration%20check">felix@quyre.de</a></p>
-  <p class="muted"><a href="impressum.html">Impressum</a> · <a href="https://github.com/larik15/n8n-sunset">Data seeded from n8n-sunset (MIT) and extended</a></p>
+  <p class="muted"><a href="impressum.html">Impressum</a> · <a href="https://github.com/larik15/n8n-sunset">Inspired by n8n-sunset (MIT)</a></p>
 </footer>
 
 <script src="models.js"></script>
@@ -66,7 +66,9 @@
     const lines = sum.markdown.split('\n\n')[0].split('\n').filter(Boolean);
     const sorted = findings.slice().sort((a, b) => (a.shutdown || '9999').localeCompare(b.shutdown || '9999') || a.workflow.localeCompare(b.workflow));
     const cols = ['Workflow', 'Active', 'Node', 'Used by', 'Model', 'Found as', 'Shutdown', 'Days left', 'Replacement', 'Note'];
-    let h = '<p class="muted">Scanned ' + today + '. ' + esc(sum.total) + ' finding' + (sum.total === 1 ? '' : 's') + '.</p>';
+    const sc = findings.scanned || { workflows: 0, nodes: 0 };
+    if (!sc.workflows) { $('results').innerHTML = '<p class="err">No n8n workflow found in this input. Paste a workflow export (it has a "nodes" array), an array of them, or an API page.</p>'; return; }
+    let h = '<p class="muted">Scanned ' + today + ': ' + sc.workflows + ' workflow' + (sc.workflows === 1 ? '' : 's') + ', ' + sc.nodes + ' nodes, ' + esc(sum.total) + ' finding' + (sum.total === 1 ? '' : 's') + '.</p>';
     h += lines.map((l) => '<p class="deadline">' + esc(l) + '</p>').join('');
     if (!findings.length) { $('results').innerHTML = h + '<p>No retiring models found.</p>'; return; }
     h += '<div class="wrap"><table><thead><tr>' + cols.map((c) => '<th>' + c + '</th>').join('') + '</tr></thead><tbody>';
@@ -80,9 +82,11 @@
     $('error').textContent = '';
     let data;
     try { data = JSON.parse(text); } catch (e) { $('error').textContent = 'Not valid JSON: ' + e.message; return; }
-    findings = S.scanWorkflow(data, { today: new Date().toISOString().slice(0, 10) });
-    $('heading').textContent = $('title').value.trim() || 'n8n model shutdown scanner';
-    render();
+    try {
+      findings = S.scanWorkflow(data, { today: new Date().toISOString().slice(0, 10) });
+      $('heading').textContent = $('title').value.trim() || 'n8n model shutdown scanner';
+      render();
+    } catch (e) { $('error').textContent = 'Scan failed: ' + e.message; return; }
     $('download').disabled = $('print').disabled = false;
   }
 

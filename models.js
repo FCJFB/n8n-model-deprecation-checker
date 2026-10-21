@@ -22,13 +22,16 @@
   add('prefix', ['ft:gpt-4o', 'ft:gpt-4o-mini', 'ft:gpt-4.1', 'ft:gpt-4.1-mini'], '2027-01-14', 'gpt-6-luna', { azureShutdown: '2027-04-14', azureSource: AZURE, note: 'fine-tune; gpt-6-luna has no fine-tuning' });
 
   // 2026-10-23 wave (announced 2026-04-22).
-  add('snapshot', ['gpt-4o-2024-05-13', 'gpt-4.1-nano-2025-04-14', 'gpt-3.5-turbo-0125', 'gpt-4-0613', 'gpt-4-1106-preview', 'o1-pro'], '2026-10-23', 'gpt-5.6-sol / -terra / -luna');
-  add('alias', ['gpt-4.1-nano', 'gpt-3.5-turbo', 'gpt-4', 'gpt-4-turbo', 'o1', 'o3-mini', 'o4-mini'], '2026-10-23', 'gpt-5.6-sol / -terra / -luna');
+  add('snapshot', ['gpt-4o-2024-05-13'], '2026-10-23', 'gpt-5.6-sol / -terra / -luna', { azureShutdown: '2026-12-09', azureSource: AZURE });
+  add('snapshot', ['gpt-4.1-nano-2025-04-14', 'gpt-3.5-turbo-0125', 'gpt-4-0613', 'gpt-4-1106-preview', 'o1-pro'], '2026-10-23', 'gpt-5.6-sol / -terra / -luna');
+  add('alias', ['gpt-4.1-nano', 'gpt-3.5-turbo', 'gpt-4', 'gpt-4-turbo'], '2026-10-23', 'gpt-5.6-sol / -terra / -luna');
+  add('alias', ['o1', 'o3-mini', 'o4-mini'], '2026-10-23', 'gpt-5.6-sol / -terra / -luna', { azureShutdown: '2026-11-19', azureSource: AZURE });
   add('alias', ['gpt-image-1'], '2026-10-23', 'gpt-image-2.5');
 
   add('alias', ['gpt-image-1-mini', 'gpt-image-1.5', 'chatgpt-image-latest'], '2026-12-01', 'gpt-image-2.5');
   add('snapshot', ['gpt-5-2025-08-07'], '2026-12-11', 'gpt-5.6');
-  add('alias', ['gpt-5', 'gpt-5-mini', 'gpt-5-nano', 'gpt-5-pro', 'o3', 'o3-pro'], '2026-12-11', 'gpt-5.6');
+  add('alias', ['gpt-5', 'gpt-5-mini', 'gpt-5-nano', 'gpt-5-pro', 'o3-pro'], '2026-12-11', 'gpt-5.6');
+  add('alias', ['o3'], '2026-12-11', 'gpt-5.6', { azureShutdown: '2026-11-19', azureSource: AZURE });
   add('alias', ['tts-1', 'tts-1-hd'], '2027-01-06', 'gpt-realtime-2.1-mini');
   add('prefix', ['gpt-4o-mini-tts'], '2027-01-06', 'gpt-realtime-2.1-mini');
   add('prefix', ['gpt-4o-audio', 'gpt-4o-realtime', 'gpt-4o-mini-audio', 'gpt-4o-mini-realtime'], '2027-01-20', 'gpt-audio-1.5 / gpt-realtime-2.1');

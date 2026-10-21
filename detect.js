@@ -3,7 +3,7 @@
 (function () {
   const S = (globalThis.n8nModelScan = globalThis.n8nModelScan || {});
   const LC = '@n8n/n8n-nodes-langchain.';
-  const ID_RE = /\b(ft:[\w.:-]+|gpt-[0-9][\w.-]*|chatgpt-[\w.-]+|o[134](?:-[\w-]+)?|claude-[\w.-]+|gemini-[\w.-]+|whisper-1|tts-1(?:-hd)?|dall-e-[23]|text-embedding-[\w-]+)/g;
+  const ID_RE = /\b(ft:[\w.:-]+|gpt-[\w.-]+|chatgpt-[\w.-]+|o[134](?:-[\w-]+)?|claude-[\w.-]+|gemini-[\w.-]+|whisper-1|tts-1(?:-hd)?|dall-e-[23]|text-embedding-[\w-]+)/g;
   const PROVIDER_URL = /api\.openai\.com|openrouter\.ai|api\.anthropic\.com|generativelanguage\.googleapis\.com|openai\.azure\.com|\/openai\/deployments\//;
   const AZURE_DEPLOYMENT = /\/deployments\/([^/?#]+)/;
 
@@ -57,7 +57,15 @@
       id = id.slice(7);
       note = 'gateway; shutdown depends on provider';
     }
-    const entry = S.MODELS.find((e) => e.kind !== 'prefix' && e.id === id) || PREFIXES().find((e) => id.startsWith(e.id));
+    let entry = S.MODELS.find((e) => e.kind !== 'prefix' && e.id === id) || PREFIXES().find((e) => id.startsWith(e.id));
+    if (!entry) {
+      // Dated snapshot of a listed alias, e.g. o3-mini-2025-01-31 or gpt-3.5-turbo-1106.
+      const base = id.replace(/-(\d{4}-\d{2}-\d{2}|\d{4})$/, '');
+      if (base !== id) {
+        entry = S.MODELS.find((e) => e.kind === 'alias' && e.id === base);
+        if (entry) note = [note, 'dated snapshot, date taken from alias; verify'].filter(Boolean).join('; ');
+      }
+    }
     return entry ? { entry, id, note } : null;
   }
   function extract(text) {
@@ -84,15 +92,20 @@
   function scanOne(wf, opts, out) {
     const today = opts.today || new Date().toISOString().slice(0, 10);
     const usedBy = {};
-    for (const src in wf.connections || {}) {
-      for (const links of (wf.connections[src].ai_languageModel || [])) {
-        for (const l of links || []) {
+    const conns = wf.connections && typeof wf.connections === 'object' ? wf.connections : {};
+    for (const src in conns) {
+      const list = (conns[src] || {}).ai_languageModel;
+      for (const links of Array.isArray(list) ? list : []) {
+        for (const l of Array.isArray(links) ? links : []) {
+          if (!l || !l.node) continue;
           usedBy[src] = (usedBy[src] ? usedBy[src] + ', ' : '') + l.node + (l.index === 1 ? ' (fallback)' : '');
         }
       }
     }
 
-    for (const node of wf.nodes || []) {
+    for (const node of Array.isArray(wf.nodes) ? wf.nodes : []) {
+      if (!node || typeof node !== 'object') continue;
+      out.scanned.nodes++;
       if (node.type === 'n8n-nodes-base.stickyNote') continue;
       const p = node.parameters || {};
       const seen = new Set();
@@ -152,6 +165,7 @@
             } else {
               const hit = lookup(value);
               if (hit) emit(loc, hit.id, 'explicit', hit, isAzure ? azure(hit) : {});
+              else if (isAzure) emit(loc, value, 'dynamic', null, { provider: 'azure-openai', note: 'Azure deployment name; open it in Azure to see which model it runs' });
             }
           }
         }
@@ -163,6 +177,9 @@
         }
         if (node.type === LC + 'openAi' && p.resource === 'audio' && (p.operation === 'transcribe' || p.operation === 'translate')) {
           emit('parameters.operation', 'whisper-1', 'inferred', lookup('whisper-1'), { note: 'hard-coded in node' });
+        }
+        if (node.type === LC + 'openAi' && p.resource === 'image' && p.operation === 'analyze' && !found) {
+          emit('parameters (default)', 'gpt-4o', 'inferred', lookup('gpt-4o'), { note: 'hard-coded fallback in node when no model is set' });
         }
       } else if (HTTP.includes(node.type)) {
         const url = typeof p.url === 'string' ? p.url : '';
@@ -183,7 +200,12 @@
     opts = opts || {};
     const list = Array.isArray(input) ? input : input && Array.isArray(input.data) ? input.data : [input];
     const out = [];
-    for (const wf of list) if (wf && typeof wf === 'object') scanOne(wf, opts, out);
+    out.scanned = { workflows: 0, nodes: 0 }; // non-array property on the result: how much was actually looked at
+    for (const wf of list) {
+      if (!wf || typeof wf !== 'object' || !Array.isArray(wf.nodes)) continue;
+      out.scanned.workflows++;
+      scanOne(wf, opts, out);
+    }
     return out;
   }
 
